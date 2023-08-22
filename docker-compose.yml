@@ -1,58 +1,116 @@
-pdns:
-  #build: pdns
-  image: interlegis/powerdns:4.4.0
-  links:
-    - "mysql:mysql"
-  ports:
-    - "53:53"
-    - "53:53/udp"
-    - "8088:8081"
-  environment:
-    - PDNSCONF_API_KEY=a_strong_api_key
-    - PDNSCONF_DNSUPDATE=yes
-    - SECALLZONES_CRONJOB=yes
+version: "3"
 
-mysql:
-  image: bitnami/mariadb:10.1.14-r3
-  environment:
-    - MARIADB_ROOT_PASSWORD=mysqlrootpw
-    - MARIADB_REPLICATION_MODE=master
-    - MARIADB_REPLICATION_USER=repl_user
-    - MARIADB_REPLICATION_PASSWORD=repl_password
-    - MARIADB_DATABASE=pdns 
-    - MARIADB_USER=pdns
-    - MARIADB_PASSWORD=pdnspw
-  volumes:
-    - dnsmasterdb:/bitnami/mariadb
-  ports:
-    - 3306:3306
+services:
+  pdns:
+    image: pschiffe/pdns-mysql:4.7
+    container_name: pdns
+    restart: unless-stopped
+    networks:
+      pdns-net:
+        ipv4_address: 172.28.1.11
+    ports:
+      - "53"              # container port (host port allocated already)
+      - "53/udp"          # ^^
+      - "8088:8081"
+    environment:
+      - PDNS_master=yes
+      - PDNS_api=yes
+      - PDNS_api_key=${PDNS_api_key?Variable not set}
+      - PDNS_webserver=yes
+      - PDNS_webserver_address=0.0.0.0
+      - PDNS_webserver_password=${PDNS_webserver_password?Variable not set}
+      - PDNS_version_string=anonymous
+      - PDNS_default_ttl=1500
+      - PDNS_allow_axfr_ips=172.28.1.12
+      - PDNS_only_notify=172.28.0.1
+      - PDNS_gmysql_host=mysql
+      - PDNS_gmysql_port=3306
+      - PDNS_gmysql_user=${MARIADB_USER?Variable not set}
+      - PDNS_gmysql_password=${MARIADB_PASSWORD?Variable not set}
+      - PDNS_gmysql_dbname=${MARIADB_DATABASE:-pdns}
+    links:
+      - mysql
+    depends_on:
+      mysql:
+        condition: service_healthy
 
-pdns-mysql:
-  image: mysql:5.6
-  container_name: pdns-mysql
-  restart: always
-  environment:
-    - MYSQL_ROOT_HOST=%
-    - MYSQL_ROOT_PASSWORD=Safe4root123
-    - MYSQL_DATABASE=pdns-admin
-    - MYSQL_USER=pdns
-    - MYSQL_PASSWORD=pdnspass
-  volumes:
-    - $PWD/mysql-data:/var/lib/mysql
+  mysql:
+    image: bitnami/mariadb:11.0-debian-11
+    container_name: mysql
+    restart: unless-stopped
+    networks:
+      pdns-net:
+        ipv4_address: 172.28.1.12
+    environment:
+      - MARIADB_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD?Variable not set}
+      - MARIADB_REPLICATION_MODE=master
+      - MARIADB_REPLICATION_USER=${MARIADB_REPLICATION_USER?Variable not set}
+      - MARIADB_REPLICATION_PASSWORD=${MARIADB_REPLICATION_PASSWORD?Variable not set}
+      - MARIADB_DATABASE=${MARIADB_DATABASE:-pdns}
+      - MARIADB_USER=${MARIADB_USER:-pdns}
+      - MARIADB_PASSWORD=${MARIADB_PASSWORD?Variable not set}
+    volumes:
+      - dnsmasterdb:/bitnami/mariadb
+    ports:
+      - "3306"            # container port (host port allocated already)
+    healthcheck:
+      test: [ "CMD", "mariadb-admin", "ping", "-h", "localhost" ]
+      interval: 10s       # check every 10 seconds
+      timeout: 10s        # time out after 10 seconds
+      start_period: 10s   # wait 10 seconds before checking
+      start_interval: 5s  # wait 5 seconds before the next check
+      retries: 3
 
-powerdns-admin:
-  image: ngoduykhanh/powerdns-admin:latest
-  ports:
-    - "9393:8000"
-  links:
-    - pdns-mysql
-    - pdns
-  environment:
-    - SECRET_KEY=admin
-    - BIND_ADDRESS=0.0.0.0
-    - PORT=8000
-    - SQLALCHEMY_DATABASE_URI=mysql://pdns:pdnspass@pdns-mysql/pdns-admin
-    - GUINCORN_TIMEOUT=60
-    - GUNICORN_WORKERS=2
-    - GUNICORN_LOGLEVEL=DEBUG
-    #- =eqjkwleuiy8yhhdhjasjdkakji9uy
+  pdns-mysql:
+    image: mysql:5.7
+    container_name: pdns-mysql
+    restart: unless-stopped
+    networks:
+      pdns-net:
+        ipv4_address: 172.28.1.13
+    environment:
+      - MYSQL_ROOT_HOST=%
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD?Variable not set}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-"pdns-admin"}
+      - MYSQL_USER=${MYSQL_USER:-"pdns"}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD?Variable not set}
+    volumes:
+      - $PWD/mysql-data:/var/lib/mysql
+
+  powerdns-admin:
+    image: ngoduykhanh/powerdns-admin:0.3
+    container_name: powerdns-admin
+    restart: unless-stopped
+    networks:
+      pdns-net:
+        ipv4_address: 172.28.1.14
+    ports:
+      - "9393:8000"
+    environment:
+      - SECRET_KEY=${SECRET_KEY?Variable not set}
+      - BIND_ADDRESS=0.0.0.0
+      - PORT=8000
+      - SQLALCHEMY_DATABASE_URI=mysql://${MYSQL_USER}:${MYSQL_PASSWORD}@pdns-mysql/pdns-admin
+      - GUINCORN_TIMEOUT=60
+      - GUNICORN_WORKERS=2
+      - GUNICORN_LOGLEVEL=DEBUG
+    volumes:
+      - $PWD/pda-data:/data
+    depends_on:
+      pdns-mysql:
+        condition: service_started
+      pdns:
+        condition: service_started
+
+volumes:
+  dnsmasterdb:
+  pda-data:
+
+networks:
+  pdns-net:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.28.0.0/16
+          gateway: 172.28.0.1
