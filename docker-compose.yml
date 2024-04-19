@@ -4,7 +4,7 @@ version: "3"
 
 services:
   pdns:
-    image: pschiffe/pdns-mysql:4.7
+    image: pschiffe/pdns-mysql:4.8
     container_name: pdns
     restart: unless-stopped
     networks:
@@ -37,7 +37,7 @@ services:
         condition: service_healthy
 
   mysql:
-    image: bitnami/mariadb:11.0-debian-11
+    image: bitnami/mariadb:11.1-debian-12
     container_name: mysql
     restart: unless-stopped
     networks:
@@ -80,7 +80,7 @@ services:
       - mysql-data:/var/lib/mysql
 
   powerdns-admin:
-    image: ngoduykhanh/powerdns-admin:0.3
+    image: ngoduykhanh/powerdns-admin:latest
     container_name: powerdns-admin
     restart: unless-stopped
     networks:
