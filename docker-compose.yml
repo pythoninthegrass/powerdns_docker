@@ -1,16 +1,18 @@
 version: "3"
 
+# TODO: revert ports to 53 after testing
+
 services:
   pdns:
-    image: pschiffe/pdns-mysql:4.7
+    image: pschiffe/pdns-mysql:4.8
     container_name: pdns
     restart: unless-stopped
     networks:
       pdns-net:
         ipv4_address: 172.28.1.11
     ports:
-      - "53"              # container port (host port allocated already)
-      - "53/udp"          # ^^
+      - "5353:53/tcp"
+      - "5353:53/udp"
       - "8088:8081"
     environment:
       - PDNS_master=yes
@@ -35,7 +37,7 @@ services:
         condition: service_healthy
 
   mysql:
-    image: bitnami/mariadb:11.0-debian-11
+    image: bitnami/mariadb:11.1-debian-12
     container_name: mysql
     restart: unless-stopped
     networks:
@@ -52,13 +54,13 @@ services:
     volumes:
       - dnsmasterdb:/bitnami/mariadb
     ports:
-      - "3306"            # container port (host port allocated already)
+      - "3306/tcp"
     healthcheck:
       test: [ "CMD", "mariadb-admin", "ping", "-h", "localhost" ]
-      interval: 10s       # check every 10 seconds
-      timeout: 10s        # time out after 10 seconds
-      start_period: 10s   # wait 10 seconds before checking
-      start_interval: 5s  # wait 5 seconds before the next check
+      interval: 10s
+      timeout: 10s
+      start_period: 10s
+      start_interval: 5s
       retries: 3
 
   pdns-mysql:
@@ -75,17 +77,17 @@ services:
       - MYSQL_USER=${MYSQL_USER:-"pdns"}
       - MYSQL_PASSWORD=${MYSQL_PASSWORD?Variable not set}
     volumes:
-      - $PWD/mysql-data:/var/lib/mysql
+      - mysql-data:/var/lib/mysql
 
   powerdns-admin:
-    image: ngoduykhanh/powerdns-admin:0.3
+    image: ngoduykhanh/powerdns-admin:latest
     container_name: powerdns-admin
     restart: unless-stopped
     networks:
       pdns-net:
         ipv4_address: 172.28.1.14
     ports:
-      - "9393:8000"
+      - "9393:8000/tcp"
     environment:
       - SECRET_KEY=${SECRET_KEY?Variable not set}
       - BIND_ADDRESS=0.0.0.0
@@ -95,7 +97,7 @@ services:
       - GUNICORN_WORKERS=2
       - GUNICORN_LOGLEVEL=DEBUG
     volumes:
-      - $PWD/pda-data:/data
+      - pda-data:/data
     depends_on:
       pdns-mysql:
         condition: service_started
@@ -104,6 +106,7 @@ services:
 
 volumes:
   dnsmasterdb:
+  mysql-data:
   pda-data:
 
 networks:
